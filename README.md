@@ -1,13 +1,13 @@
 # Employee Command Service
 
-A Spring Boot REST application that creates employees and updates employee email addresses in PostgreSQL. This project demonstrates the command side of a CQRS-oriented design using a controller, service, and Spring Data JPA repository.
+A Spring Boot REST application that creates employees, updates employee email addresses, and deletes employees in PostgreSQL. This project demonstrates the command side of a CQRS-oriented design using a controller, service, and Spring Data JPA repository.
 
 ## Project documentation
 
 - [Detailed project notes (Markdown)](PROJECT_NOTES.md)
 - [Detailed project notes (Word)](PROJECT_NOTES.docx)
 
-The notes explain CQRS, the employee use case, Spring Data JPA, `JpaRepository` versus `CrudRepository`, PostgreSQL properties, both API execution flows, and every annotation used in the project.
+The notes explain CQRS, the employee use case, Spring Data JPA, `JpaRepository` versus `CrudRepository`, PostgreSQL properties, request and response DTOs, all three API execution flows, and the annotations used in the project.
 
 ## Technology
 
@@ -16,6 +16,8 @@ The notes explain CQRS, the employee use case, Spring Data JPA, `JpaRepository` 
 - Spring Data JPA with Hibernate for persistence
 - PostgreSQL with its JDBC driver
 - Maven wrapper for builds and application startup
+
+The POM adds `spring-boot-starter-jetty` and excludes `spring-boot-tomcat` from the MVC starter. The resolved runtime server has not been verified with a dependency tree or application startup.
 
 ## Architecture
 
@@ -61,8 +63,9 @@ The current `spring.jpa.hibernate.ddl-auto=update` setting lets Hibernate attemp
 
 | Method | Path | Behavior | Successful response |
 | --- | --- | --- | --- |
-| POST | `/api/v1/employees` | Creates an employee with first name, last name, and email | Normally `200 OK`, empty body |
+| POST | `/api/v1/employees` | Creates an employee with first name, last name, and email | `201 Created`, JSON employee details without ID |
 | PUT | `/api/v1/employees/{id}` | Updates only the existing employee's email | Normally `200 OK`, empty body |
+| DELETE | `/api/v1/employees/{id}` | Finds and deletes an existing employee | Normally `200 OK`, empty body |
 
 ### Create an employee
 
@@ -79,7 +82,17 @@ Invoke-RestMethod -Method Post `
     -Body $createBody
 ```
 
-The database generates the employee ID, but the API does not return it. There is no GET endpoint. Find the ID using a database client connected to `employee_db`:
+The POST response contains an `EmployeeResponse`:
+
+```json
+{
+  "firstName": "Anita",
+  "lastName": "Rao",
+  "email": "anita.rao@example.com"
+}
+```
+
+The database generates the employee ID, but the response does not include it and no `Location` header is set. There is no GET endpoint. Find the ID using a database client connected to `employee_db`:
 
 ```sql
 SELECT id, first_name, last_name, email
@@ -103,13 +116,24 @@ Invoke-RestMethod -Method Put `
 
 The update implementation ignores first and last names, even if supplied. Omitting email sets it to null if the database permits it.
 
+### Delete an employee
+
+Use the actual employee ID; this removes the stored row:
+
+```powershell
+Invoke-RestMethod -Method Delete `
+    -Uri "http://localhost:8080/api/v1/employees/$employeeId"
+```
+
+The service first looks up the employee, then calls `delete(employee)`. Success normally returns `200 OK` with no body, rather than an explicitly configured `204 No Content`. A missing ID, including a repeated deletion, throws the same generic exception as an update.
+
 ## Current behavior and limitations
 
 - First name is mapped as non-null, and email is mapped as unique. There is no DTO validation for blank names or email format.
 - Missing employee IDs throw a generic exception, normally producing HTTP 500 rather than a custom 404 response.
 - No custom error mapping exists for duplicate emails or other database constraints.
-- Repository methods provide transaction behavior, but no service-level transaction spans the complete update operation.
-- The project has no GET or DELETE endpoints.
+- Repository methods provide transaction behavior, but no service-level transaction spans the complete update or delete operation.
+- The project has no GET endpoint.
 
 These behaviors are documented from source inspection; the documentation does not claim that live API verification has been performed.
 
@@ -119,7 +143,7 @@ These behaviors are documented from source inspection; the documentation does no
 .\mvnw.cmd test
 ```
 
-The existing `contextLoads()` test verifies application context startup only. With the current configuration it can require a running PostgreSQL database. It does not test the add or update API behavior.
+The existing `contextLoads()` test verifies application context startup only. With the current configuration it can require a running PostgreSQL database. It does not test the create, update, or delete API behavior.
 
 ## Refresh the Word notes
 

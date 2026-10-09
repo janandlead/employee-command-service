@@ -47,7 +47,7 @@ foreach ($line in $lines) {
                     [void]$body.Append((New-Paragraph '  -> EmployeeRepository proxy -> JPA / Hibernate' 'Code' $true))
                     [void]$body.Append((New-Paragraph '  -> JDBC driver -> PostgreSQL employee_db' 'Code' $true))
                 } else {
-                    [void]$body.Append((New-Paragraph 'Client --POST / PUT--> Command service --> Write database' 'Code' $true))
+                    [void]$body.Append((New-Paragraph 'Client --POST / PUT / DELETE--> Command service --> Write database' 'Code' $true))
                     [void]$body.Append((New-Paragraph 'Command service --future events--> Projection handler --> Read model' 'Code' $true))
                     [void]$body.Append((New-Paragraph 'Client --future GET--> Query service --> Read model' 'Code' $true))
                 }

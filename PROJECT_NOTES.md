@@ -16,17 +16,19 @@ These notes describe the source code currently in this project. Examples of futu
 10. [Transactions and error handling](#10-transactions-and-error-handling)
 11. [Running and trying the APIs](#11-running-and-trying-the-apis)
 12. [Revision questions](#12-revision-questions)
+13. [Delete employee execution flow](#13-delete-employee-execution-flow)
 
 ## 1. Project purpose and structure
 
-`employee-command-service` is a Spring Boot REST application that writes employee data to PostgreSQL. Its two business operations are creating an employee and changing an existing employee's email.
+`employee-command-service` is a Spring Boot REST application that writes employee data to PostgreSQL. Its three business operations are creating an employee, changing an existing employee's email, and deleting an employee.
 
 | Operation | Endpoint | Implemented behavior |
 | --- | --- | --- |
-| Add employee | `POST /api/v1/employees` | Saves first name, last name, and email with a generated ID |
+| Add employee | `POST /api/v1/employees` | Saves the employee and returns `201 Created` with name and email, without the generated ID |
 | Update employee | `PUT /api/v1/employees/{id}` | Finds the employee and changes **only email** |
+| Delete employee | `DELETE /api/v1/employees/{id}` | Finds the employee and removes its row; normally returns `200 OK` with no body |
 
-There are no GET or DELETE endpoints, query service, message broker, or event publisher in the supplied source.
+There is no GET endpoint, query service, message broker, or event publisher in the supplied source.
 
 ### Technology configuration
 
@@ -35,11 +37,14 @@ There are no GET or DELETE endpoints, query service, message broker, or event pu
 | Dependency | Role here |
 | --- | --- |
 | `spring-boot-starter-webmvc` | Spring MVC REST request handling and embedded web application support |
+| `spring-boot-starter-jetty` | Adds Jetty server support; the MVC dependency also excludes `spring-boot-tomcat` |
 | `spring-boot-starter-data-jpa` | Spring Data repositories, JPA integration, and the default Hibernate provider |
 | `postgresql` | PostgreSQL JDBC driver; runtime scope makes it available when the application runs |
 | `lombok` | Declared and configured as an annotation processor, but no Lombok annotations are used in these classes |
 | `spring-boot-starter-data-jpa-test` | JPA-related test support |
 | `spring-boot-starter-webmvc-test` | MVC-related test support |
+
+The Jetty dependency and Tomcat exclusion describe the current POM. The resolved runtime server has not been checked with a dependency tree or application startup.
 
 ### Source map
 
@@ -50,8 +55,9 @@ All application classes live under `src/main/java/com/durga/employee/`.
 | [EmployeeCommandServiceApplication.java](src/main/java/com/durga/employee/EmployeeCommandServiceApplication.java) | Starts Spring Boot |
 | [controller/EmployeeController.java](src/main/java/com/durga/employee/controller/EmployeeController.java) | Maps HTTP requests to service calls |
 | [dto/EmployeeRequest.java](src/main/java/com/durga/employee/dto/EmployeeRequest.java) | Holds incoming first name, last name, and email |
-| [service/EmployeeService.java](src/main/java/com/durga/employee/service/EmployeeService.java) | Defines the two application operations |
-| [service/EmployeeServiceImpl.java](src/main/java/com/durga/employee/service/EmployeeServiceImpl.java) | Implements creation and update logic |
+| [dto/EmployeeResponse.java](src/main/java/com/durga/employee/dto/EmployeeResponse.java) | Holds first name, last name, and email returned after creation; no ID field |
+| [service/EmployeeService.java](src/main/java/com/durga/employee/service/EmployeeService.java) | Defines creation, update, and deletion operations |
+| [service/EmployeeServiceImpl.java](src/main/java/com/durga/employee/service/EmployeeServiceImpl.java) | Implements creation, update, and deletion logic |
 | [entity/Employee.java](src/main/java/com/durga/employee/entity/Employee.java) | Maps employee objects to database rows |
 | [repository/EmployeeRepository.java](src/main/java/com/durga/employee/repository/EmployeeRepository.java) | Provides inherited JPA persistence methods |
 | [application.properties](src/main/resources/application.properties) | Configures PostgreSQL and Hibernate |
@@ -80,7 +86,7 @@ The controller handles HTTP concerns, the service expresses the use case, and th
 | Change an employee's email | Search employees by name |
 | Deactivate an employee | Display an employee directory |
 
-Only the first two command examples exist here. The remaining operations illustrate how the application could grow.
+The first two command examples exist here, along with employee deletion. Deactivation is not implemented: deletion removes the row rather than marking it inactive. The query examples illustrate how the application could grow.
 
 ### How this project fits
 
@@ -92,7 +98,7 @@ A possible future architecture is:
 
 ```mermaid
 flowchart LR
-    A[Client] -->|POST / PUT| B[Command service]
+    A[Client] -->|POST / PUT / DELETE| B[Command service]
     B --> C[(Write database)]
     B -.->|Future events| D[Projection handler]
     D -.-> E[(Read model)]
@@ -142,7 +148,7 @@ employeeRepository.count();         // long
 employeeRepository.deleteById(id);
 ```
 
-Only `save()` and `findById()` are called by the current service. Repository methods do not automatically create REST endpoints.
+The current service calls `save()`, `findById()`, and `delete(employee)`. Although `deleteById()` is available, the deletion workflow first finds the employee and then passes that entity to `delete()`. Repository methods do not automatically create REST endpoints.
 
 ### How save decides what to do
 
@@ -183,7 +189,7 @@ QueryByExampleExecutor ───────────────────
 
 Do not assume that the modern `PagingAndSortingRepository` itself extends `CrudRepository`; `JpaRepository` combines the capabilities through its parent interfaces.
 
-Both interfaces support the two methods currently used by this project. `JpaRepository` additionally makes JPA-specific capabilities available. Extending it does not automatically make queries faster, and `saveAll()` does not by itself guarantee JDBC batching.
+Both interfaces support the persistence methods currently used by this project. `JpaRepository` additionally makes JPA-specific capabilities available. Extending it does not automatically make queries faster, and `saveAll()` does not by itself guarantee JDBC batching.
 
 **Flush vs commit:** flushing synchronizes pending persistence changes with the database; committing completes the transaction. `saveAndFlush()` does not independently guarantee a commit of an enclosing transaction. Bulk deletion methods also have different persistence-context and lifecycle behavior from deleting entities one by one. See the [JpaRepository method documentation](https://docs.spring.io/spring-data/jpa/reference/api/java/org/springframework/data/jpa/repository/JpaRepository.html).
 
@@ -292,6 +298,12 @@ public class EmployeeRequest {
 
 A DTO, or Data Transfer Object, defines incoming application data. Spring MVC's configured JSON message converter maps JSON properties onto this object. It has no database mapping annotations and no ID field.
 
+### EmployeeResponse: the output DTO
+
+`EmployeeResponse` contains `firstName`, `lastName`, and `email`, with a three-argument constructor and explicit getters and setters. It has no ID field and no persistence annotations. The create service returns this DTO, and the controller uses `ResponseEntity<EmployeeResponse>` to set HTTP `201 Created` and serialize the DTO as JSON. Update and delete return no response DTO.
+
+The service stores the return value of `save(employee)` in `employee2`, but constructs the response from the original `employee` object. The saved return value is currently unused.
+
 ### Employee: the persisted entity
 
 | Java field | Database column | Mapping |
@@ -341,9 +353,17 @@ Content-Type: application/json
 7. `employeeRepository.save(employee)` invokes the Spring Data JPA repository proxy.
 8. The new entity has a null ID, so persistence follows the new-entity path. Hibernate generates the insert and PostgreSQL generates the ID.
 9. Database constraints are checked as the write executes. On success, the repository transaction completes.
-10. Both service and controller return `void`. With the current controller and normal Spring MVC handling, the successful HTTP response is **200 OK with an empty body**.
+10. The service builds an `EmployeeResponse` containing first name, last name, and email. The controller returns `ResponseEntity.status(HttpStatus.CREATED).body(employeeResponse)`, producing **201 Created with a JSON body**.
 
-The code does not explicitly send `201 Created`, a `Location` header, or the generated employee ID.
+The code does not send a `Location` header or include the generated employee ID in the response.
+
+```json
+{
+  "firstName": "Anita",
+  "lastName": "Rao",
+  "email": "anita.rao@example.com"
+}
+```
 
 ### Service code
 
@@ -352,7 +372,8 @@ Employee employee = new Employee();
 employee.setEmail(employeeRequest.getEmail());
 employee.setFirstName(employeeRequest.getFirstName());
 employee.setLastName(employeeRequest.getLastName());
-employeeRepository.save(employee);
+Employee employee2 = employeeRepository.save(employee);
+return new EmployeeResponse(employee.getFirstName(), employee.getLastName(), employee.getEmail());
 ```
 
 Conceptually, the database receives an operation like:
@@ -443,8 +464,9 @@ Combines Spring Boot configuration, auto-configuration, and component scanning. 
 | `@RequestMapping("/api/v1/employees")` | Controller class | Adds the common route prefix to handler methods |
 | `@PostMapping` | One-argument `addEmployee` | Handles POST at the class-level route |
 | `@PutMapping("/{id}")` | Two-argument `addEmployee` | Handles PUT with an employee ID in the URL |
+| `@DeleteMapping("/{id}")` | `deleteEmployee` | Handles DELETE with an employee ID in the URL |
 | `@RequestBody` | Both DTO parameters | Reads and converts the HTTP request body into `EmployeeRequest` |
-| `@PathVariable` | PUT method's `Long id` parameter | Binds and converts the `{id}` path value |
+| `@PathVariable` | PUT and DELETE methods' `Long id` parameters | Binds and converts the `{id}` path value |
 
 `@RequestBody` does not automatically validate email format or business constraints. The unnamed `@PathVariable` relies on the Java parameter name `id` being available; `@PathVariable("id")` would make that binding explicit.
 
@@ -454,7 +476,7 @@ Combines Spring Boot configuration, auto-configuration, and component scanning. 
 
 **`@Repository`** — on `EmployeeRepository`. Marks the persistence role. For Spring Data repository interfaces, repository scanning already discovers the interface and creates its proxy, so this annotation is generally optional here. Spring's persistence infrastructure also provides exception translation to the Spring data-access exception hierarchy; the annotation itself does not generate SQL.
 
-**`@Override`** — on the implementation's `addEmployee()` and `updateEmployee()`. This Java annotation lets the compiler verify that each method implements or overrides an inherited method. It is unrelated to Spring bean discovery.
+**`@Override`** — on the implementation's `addEmployee()`, `updateEmployee()`, and `deleteEmployee()`. This Java annotation lets the compiler verify that each method implements or overrides an inherited method. It is unrelated to Spring bean discovery.
 
 ### Persistence annotations
 
@@ -476,7 +498,7 @@ The test file is [EmployeeCommandServiceApplicationTests.java](src/test/java/com
 
 **`@SpringBootTest`** loads the Spring Boot application context for an integration-style test. With the default web environment it does not start a real listening HTTP server. Because no separate test datasource is configured here, context initialization can still require the configured PostgreSQL database.
 
-**`@Test`**, imported from JUnit Jupiter, identifies `contextLoads()` as a test method. Its empty body checks only that context loading succeeds. It does not verify either API's business behavior.
+**`@Test`**, imported from JUnit Jupiter, identifies `contextLoads()` as a test method. Its empty body checks only that context loading succeeds. It does not verify the create, update, or delete API behavior.
 
 ### Important annotations absent from this code
 
@@ -497,13 +519,15 @@ Inherited Spring Data JPA CRUD methods carry default transaction configuration: 
 
 Entity attachment between calls can depend on persistence-context configuration, including Open EntityManager in View. An open persistence context is not itself a service-wide database transaction.
 
+The delete workflow also has separate `findById()` and `delete(employee)` repository calls without a service-level transaction. A concurrent change can occur between them; the source does not define a special concurrency response.
+
 A possible future improvement is placing Spring's `@Transactional` on the service update method so its work shares a transaction. In such a transaction, JPA dirty checking can persist changes to a managed entity at flush time. A transaction alone does not prevent every concurrent lost update; an optimistic-locking version field can help detect conflicts. These changes are not present now.
 
 ### Expected failure behavior from the current code
 
 | Situation | Current behavior |
 | --- | --- |
-| Missing employee ID in the database | Generic `RuntimeException`; normally HTTP 500, not a deliberately mapped 404 |
+| Missing employee ID during update or deletion | Generic `RuntimeException`; normally HTTP 500, not a deliberately mapped 404 |
 | Non-numeric path ID, such as `/employees/abc` | Path conversion fails; normally HTTP 400 |
 | Malformed JSON or missing required request body | MVC rejects the request; normally HTTP 400 |
 | POST with missing/null first name | Can fail on the non-null constraint; no DTO validation provides an early, friendly response |
@@ -513,7 +537,7 @@ A possible future improvement is placing Spring's `@Transactional` on the servic
 
 Database failures are normally surfaced as server errors without custom exception mapping. Exact error response JSON and whether exception messages are exposed depend on Spring Boot error configuration. The source does not define a stable error response contract.
 
-Potential improvements include request validation, a specific not-found exception mapped to 404, a duplicate-email response mapped to 409, and explicit success statuses. These notes document them without changing the application.
+Potential improvements include request validation, a specific not-found exception mapped to 404, a duplicate-email response mapped to 409, and an explicit `204 No Content` status for update and delete. Creation already explicitly returns `201 Created`. These notes document possible improvements without changing the application.
 
 ## 11. Running and trying the APIs
 
@@ -550,7 +574,7 @@ Invoke-RestMethod -Method Post `
     -Body $createBody
 ```
 
-An empty success response is expected. The generated ID is not returned by the API. Since there is no GET endpoint, inspect the row using a database client connected to `employee_db`:
+A successful create returns `201 Created` with first name, last name, and email as JSON. The generated ID is not returned by the API. Since there is no GET endpoint, inspect the row using a database client connected to `employee_db`:
 
 ```sql
 SELECT id, first_name, last_name, email
@@ -582,13 +606,24 @@ SELECT id, first_name, last_name, email FROM employees WHERE id = 1;
 
 Use the actual ID in that SQL too. Repeating the create request with an already stored email can violate the unique constraint.
 
-### Existing test
+### Delete the employee
+
+After checking the update, remove the employee using the actual ID:
+
+```powershell
+Invoke-RestMethod -Method Delete `
+    -Uri "http://localhost:8080/api/v1/employees/$employeeId"
+```
+
+Success normally has an empty `200 OK` response. Run the same SELECT query to confirm the row is absent. Repeating the DELETE request reaches the missing-employee exception; no custom 404 response is configured.
+
+### Run the existing test
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-The existing test only loads the context. It is not proof that creation, updates, missing IDs, or constraint failures behave correctly. Dedicated integration tests would be needed to verify those cases automatically.
+The existing test only loads the context. It is not proof that creation, updates, deletion, missing IDs, or constraint failures behave correctly. Dedicated integration tests would be needed to verify those cases automatically.
 
 ## 12. Revision questions
 
@@ -630,4 +665,41 @@ A write operation may need current state. That internal read does not create a c
 
 **Is this a complete distributed CQRS implementation?**
 
-No. It implements two command-side HTTP operations backed by a relational database. Separate queries, projections, and event delivery would require additional work.
+No. It implements three command-side HTTP operations backed by a relational database. Separate queries, projections, and event delivery would require additional work.
+
+**What does creation return?**
+
+HTTP `201 Created` with an `EmployeeResponse` containing first name, last name, and email. The generated ID and a `Location` header are not included.
+
+**Does deletion use `deleteById()` directly?**
+
+No. It finds the employee with `findById()`, throws if absent, and passes the found entity to `delete(employee)`.
+
+## 13. Delete employee execution flow
+
+```http
+DELETE /api/v1/employees/1
+```
+
+1. `@DeleteMapping("/{id}")` selects `EmployeeController.deleteEmployee(Long id)`.
+2. `@PathVariable` converts the path ID to `Long`; no request body is required.
+3. The controller calls `employeeService.deleteEmployee(id)`.
+4. The service calls `employeeRepository.findById(id)`.
+5. If absent, it throws `RuntimeException("Employee Not Found wiht id: " + id)`, as the update method does.
+6. If present, it calls `employeeRepository.delete(employee)` to remove the entity.
+7. Both methods return `void`, so success normally produces `200 OK` with an empty body. No explicit `204` status is set.
+
+```java
+Employee employee = employeeRepository.findById(id)
+    .orElseThrow(() -> new RuntimeException("Employee Not Found wiht id: " + id));
+employeeRepository.delete(employee);
+```
+
+The conceptual database effect is:
+
+```sql
+SELECT id, first_name, last_name, email FROM employees WHERE id = 1;
+DELETE FROM employees WHERE id = 1;
+```
+
+Actual SQL and statement count depend on Hibernate and persistence-context behavior. This is a physical deletion; there is no inactive flag, soft-delete mechanism, or deletion event in the implementation.

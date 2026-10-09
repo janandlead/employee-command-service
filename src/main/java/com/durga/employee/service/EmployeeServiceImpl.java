@@ -5,6 +5,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 import com.durga.employee.dto.EmployeeRequest;
+import com.durga.employee.dto.EmployeeResponse;
 import com.durga.employee.entity.Employee;
 import com.durga.employee.repository.EmployeeRepository;
 
@@ -18,7 +19,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 	}
 
 	@Override
-	public void addEmployee(EmployeeRequest employeeRequest) {
+	public EmployeeResponse addEmployee(EmployeeRequest employeeRequest) {
 
 		Employee employee = new Employee();
 
@@ -26,20 +27,29 @@ public class EmployeeServiceImpl implements EmployeeService {
 		employee.setFirstName(employeeRequest.getFirstName());
 		employee.setLastName(employeeRequest.getLastName());
 
-		employeeRepository.save(employee);
+		Employee employee2= employeeRepository.save(employee);
+		return new EmployeeResponse(employee.getFirstName(), employee.getLastName(), employee.getEmail());
 
 	}
 
 	@Override
 	public void updateEmployee(Long id, EmployeeRequest employeeRequest) {
-		
+
 		Employee employee = employeeRepository.findById(id)
-				.orElseThrow(()->new RuntimeException("Employee Not Found wiht id: "+id));
-		
+				.orElseThrow(() -> new RuntimeException("Employee Not Found wiht id: " + id));
+
 		employee.setEmail(employeeRequest.getEmail());
 		employeeRepository.save(employee);
-		
-		
+
+	}
+
+	@Override
+	public void deleteEmployee(Long id) {
+		Employee employee = employeeRepository.findById(id)
+				.orElseThrow(() -> new RuntimeException("Employee Not Found wiht id: " + id));
+
+		employeeRepository.delete(employee);
+
 	}
 
 }
